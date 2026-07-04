@@ -55,7 +55,7 @@ chronicle embed all
 
 Restart Claude Code after step 2. From that point:
 - **Session start**: Claude receives a brief of all FALSIFIED entities, validated edges, and recent decisions.
-- **Session end**: Any `chronicle-log` blocks Claude emitted are auto-ingested.
+- **Session end**: Any `chronicle-log` entries Claude wrote during the session are automatically saved to the database.
 
 ## Companion tools
 
