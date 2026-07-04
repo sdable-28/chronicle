@@ -7,13 +7,13 @@ Chronicle gives Claude a persistent memory of what worked, what failed, and why 
 ## Install
 
 ```bash
-pip install git+https://github.com/sdable-28/chronicle.git
+pip install ai-chronicle
 ```
 
 With semantic search (recommended):
 
 ```bash
-pip install "chronicle[embed] @ git+https://github.com/sdable-28/chronicle.git"
+pip install "ai-chronicle[embed]"
 ```
 
 ## Setup
