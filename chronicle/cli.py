@@ -23,6 +23,157 @@ def _die(msg: str):
     sys.exit(1)
 
 
+def _capture_snippet(file_path: str, line_start: int | None) -> str | None:
+    """Read 3 lines of context around line_start for later fingerprinting."""
+    if not line_start:
+        return None
+    try:
+        lines = Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines()
+        lo = max(0, line_start - 2)
+        hi = min(len(lines), line_start + 1)
+        return "\n".join(lines[lo:hi])
+    except Exception:
+        return None
+
+
+def _find_snippet_in_file(snippet: str, file_path: Path) -> int | None:
+    """Search for snippet text in file; return 1-indexed line number of best match."""
+    try:
+        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        needle = snippet.strip().splitlines()
+        if not needle:
+            return None
+        first_line = needle[0].strip()
+        for i, line in enumerate(lines):
+            if line.strip() == first_line:
+                # verify subsequent lines match too
+                match = True
+                for j, nl in enumerate(needle[1:], 1):
+                    if i + j >= len(lines) or lines[i + j].strip() != nl.strip():
+                        match = False
+                        break
+                if match:
+                    return i + 1  # 1-indexed, pointing at first needle line
+    except Exception:
+        pass
+    return None
+
+
+def _git_find_rename(old_path: str, search_root: Path) -> str | None:
+    """Ask git if old_path was renamed in recent history. Returns new path or None."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "log", "--diff-filter=R", "--name-status", "--format=", "-50", "--", old_path],
+            cwd=str(search_root),
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[0].startswith("R"):
+                return parts[2]  # new path
+    except Exception:
+        pass
+    return None
+
+
+def _run_verify_row(row, roots: list[Path], now: str, conn, dry_run: bool = False) -> str:
+    """
+    Run the smart decision tree on one wiring row.
+    Returns 'ok', 'updated', or 'broken'.
+    Writes DB updates unless dry_run=True.
+    """
+    file_str = row["file"]
+    line_num  = row["line_start"]
+    eid       = row["entity_id"]
+    snippet   = row["content_snippet"] if "content_snippet" in row.keys() else None
+
+    # Resolve file path
+    resolved: Path | None = None
+    p = Path(file_str)
+    if p.is_absolute():
+        resolved = p if p.exists() else None
+    else:
+        for root in roots:
+            c = root / file_str
+            if c.exists():
+                resolved = c
+                break
+
+    # ── Part 1: file found ────────────────────────────────────────────────────
+    if resolved is not None:
+        if not line_num:
+            if not dry_run:
+                conn.execute("UPDATE wiring SET verified_at=?, last_check_at=? WHERE id=?",
+                             (now, now, row["id"]))
+                _log_event_impl(conn, eid, "WIRING_VERIFIED", f"verified: {file_str}")
+            click.echo(f"  OK      {eid:<50}  {file_str}")
+            return "ok"
+
+        try:
+            lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            lines = []
+
+        if line_num <= len(lines):
+            if not dry_run:
+                conn.execute("UPDATE wiring SET verified_at=?, last_check_at=? WHERE id=?",
+                             (now, now, row["id"]))
+                _log_event_impl(conn, eid, "WIRING_VERIFIED", f"verified: {file_str}:{line_num}")
+            click.echo(f"  OK      {eid:<50}  {file_str}:{line_num}")
+            return "ok"
+
+        # Line out of range — try content fingerprint
+        if snippet:
+            new_line = _find_snippet_in_file(snippet, resolved)
+            if new_line:
+                if not dry_run:
+                    conn.execute(
+                        "UPDATE wiring SET line_start=?, verified_at=?, last_check_at=? WHERE id=?",
+                        (new_line, now, now, row["id"]),
+                    )
+                    _log_event_impl(conn, eid, "WIRING_VERIFIED",
+                                    f"auto-corrected line drift: {file_str}:{line_num} -> :{new_line}")
+                click.echo(f"  UPDATED {eid:<50}  {file_str}:{line_num} -> :{new_line}  (line drift)")
+                return "updated"
+
+        # No fingerprint match — broken
+        if not dry_run:
+            conn.execute("UPDATE wiring SET status='BROKEN', last_check_at=? WHERE id=?",
+                         (now, row["id"]))
+            _log_event_impl(conn, eid, "WIRING_BROKEN",
+                            f"line {line_num} exceeds file length {len(lines)}")
+        click.echo(f"  BROKEN  {eid:<50}  {file_str}:{line_num}  [line out of range]")
+        return "broken"
+
+    # ── Part 2: file not found — try git rename ───────────────────────────────
+    new_path = _git_find_rename(file_str, roots[0])
+    if new_path:
+        new_resolved = roots[0] / new_path
+        if not dry_run:
+            conn.execute(
+                "UPDATE wiring SET file=?, verified_at=?, last_check_at=? WHERE id=?",
+                (new_path, now, now, row["id"]),
+            )
+            _log_event_impl(conn, eid, "WIRING_VERIFIED",
+                            f"auto-corrected rename: {file_str} -> {new_path}")
+        old_loc = f"{file_str}:{line_num}" if line_num else file_str
+        new_loc = f"{new_path}:{line_num}" if line_num else new_path
+        click.echo(f"  UPDATED {eid:<50}  {old_loc} -> {new_loc}  (git rename)")
+        return "updated"
+
+    # ── Part 3: truly broken ──────────────────────────────────────────────────
+    if not dry_run:
+        conn.execute("UPDATE wiring SET status='BROKEN', last_check_at=? WHERE id=?",
+                     (now, row["id"]))
+        _log_event_impl(conn, eid, "WIRING_BROKEN",
+                        f"file not found, no git rename: {file_str}")
+    loc = f"{file_str}:{line_num}" if line_num else file_str
+    click.echo(f"  BROKEN  {eid:<50}  {loc}  [not found, no git rename]")
+    click.echo(f"          -> chronicle wire {eid} -f <new_path> --line-start N")
+    return "broken"
+
+
 ENTITY_TYPES = ["STRATEGY", "EDGE", "HYPOTHESIS", "FEATURE", "OBSERVATION", "SYSTEM"]
 ENTITY_STATUSES = ["PROPOSED", "IN_RESEARCH", "VALIDATED", "LIVE", "FALSIFIED", "DEPRECATED", "SUPERSEDED"]
 ALL_EVENT_TYPES = [
@@ -353,15 +504,16 @@ def alias(alias_name, canonical_id, note):
 @click.option("--commit")
 def wire(entity_id, file_path, line_start, line_end, description, commit):
     """Record a code wiring location for an entity."""
+    snippet = _capture_snippet(file_path, line_start)
     with get_db() as conn:
         canonical = resolve_entity(entity_id, conn)
         if not canonical:
             _die(f"Entity '{entity_id}' not found.")
         conn.execute(
             """INSERT INTO wiring(entity_id, file, line_start, line_end,
-               description, git_commit, wired_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (canonical, file_path, line_start, line_end, description, commit, _now()),
+               description, git_commit, wired_at, content_snippet)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (canonical, file_path, line_start, line_end, description, commit, _now(), snippet),
         )
         # Log WIRED event
         _log_event_impl(
@@ -399,67 +551,64 @@ def verify(entity_id, root_dir):
             return
 
         now = _now()
-        ok_count = broken_count = 0
+        ok_count = updated_count = broken_count = 0
 
         for row in rows:
-            file_str  = row["file"]
-            line_num  = row["line_start"]
-            eid       = row["entity_id"]
-
-            # Resolve: try absolute, then each root
-            resolved: Path | None = None
-            p = Path(file_str)
-            if p.is_absolute():
-                resolved = p if p.exists() else None
-            else:
-                for root in roots:
-                    c = root / file_str
-                    if c.exists():
-                        resolved = c
-                        break
-
-            if resolved is None:
-                broken_count += 1
-                conn.execute(
-                    "UPDATE wiring SET status='BROKEN', last_check_at=? WHERE id=?",
-                    (now, row["id"]),
-                )
-                _log_event_impl(conn, eid, "WIRING_BROKEN",
-                                f"wiring broken: {file_str} - file not found")
-                loc = f"{file_str}:{line_num}" if line_num else file_str
-                click.echo(f"  BROKEN  {eid:<50}  {loc}  [file not found]")
-                continue
-
-            reason = ""
-            if line_num:
-                try:
-                    lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
-                    if line_num > len(lines):
-                        reason = f"line {line_num} > file length {len(lines)}"
-                except Exception as exc:
-                    reason = str(exc)[:80]
-
-            if reason:
-                broken_count += 1
-                conn.execute(
-                    "UPDATE wiring SET status='BROKEN', last_check_at=? WHERE id=?",
-                    (now, row["id"]),
-                )
-                _log_event_impl(conn, eid, "WIRING_BROKEN",
-                                f"wiring broken: {file_str}:{line_num} - {reason}")
-                click.echo(f"  BROKEN  {eid:<50}  {file_str}:{line_num}  [{reason}]")
-            else:
+            result = _run_verify_row(row, roots, now, conn)
+            if result == "ok":
                 ok_count += 1
-                conn.execute(
-                    "UPDATE wiring SET verified_at=?, last_check_at=? WHERE id=?",
-                    (now, now, row["id"]),
-                )
-                _log_event_impl(conn, eid, "WIRING_VERIFIED",
-                                f"wiring verified: {file_str}" + (f":{line_num}" if line_num else ""))
-                loc = f"{file_str}:{line_num}" if line_num else file_str
-                click.echo(f"  OK      {eid:<50}  {loc}")
+            elif result == "updated":
+                updated_count += 1
+            else:
+                broken_count += 1
 
-        click.echo(f"\n{ok_count} OK, {broken_count} BROKEN")
+        parts = [f"{ok_count} OK"]
+        if updated_count:
+            parts.append(f"{updated_count} auto-corrected")
+        if broken_count:
+            parts.append(f"{broken_count} BROKEN")
+        click.echo(f"\n{', '.join(parts)}")
+
+
+# ── realign ───────────────────────────────────────────────────────────────────
+
+@cli.command("realign")
+@click.option("--root", "-r", "root_dir", default=None,
+              help="Project root for resolving relative paths (default: cwd)")
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing")
+def realign(root_dir, dry_run):
+    """Scan all wired locations and auto-correct line drift and file renames."""
+    roots: list[Path] = [Path(root_dir).resolve() if root_dir else Path.cwd()]
+
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM wiring WHERE status='ACTIVE'").fetchall()
+        if not rows:
+            click.echo("No active wirings.")
+            return
+
+        total = len(rows)
+        click.echo(f"{'[DRY RUN] ' if dry_run else ''}Scanning {total} wired locations...\n")
+
+        now = _now()
+        ok_count = updated_count = broken_count = 0
+
+        for row in rows:
+            result = _run_verify_row(row, roots, now, conn, dry_run=dry_run)
+            if result == "ok":
+                ok_count += 1
+            elif result == "updated":
+                updated_count += 1
+            else:
+                broken_count += 1
+
+        parts = [f"{ok_count} OK"]
+        if updated_count:
+            parts.append(f"{updated_count} auto-corrected")
+        if broken_count:
+            parts.append(f"{broken_count} need attention")
+        click.echo(f"\n{', '.join(parts)}")
+        if dry_run:
+            click.echo("Re-run without --dry-run to apply.")
 
 
 # ── trace ─────────────────────────────────────────────────────────────────────

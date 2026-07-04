@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 DEFAULT_DB = Path.home() / ".chronicle" / "chronicle.db"
 
@@ -132,9 +132,10 @@ CREATE TABLE IF NOT EXISTS wiring (
     status        TEXT    NOT NULL DEFAULT 'ACTIVE'
                     CHECK(status IN ('ACTIVE','STALE','BROKEN','REMOVED')),
     git_commit    TEXT,
-    wired_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    verified_at   TEXT,
-    last_check_at TEXT
+    wired_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    verified_at      TEXT,
+    last_check_at    TEXT,
+    content_snippet  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -218,6 +219,7 @@ CREATE TABLE IF NOT EXISTS guard_log (
     triggered_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 """,
+    3: "ALTER TABLE wiring ADD COLUMN content_snippet TEXT;",
 }
 
 
