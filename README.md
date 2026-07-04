@@ -23,6 +23,8 @@ With semantic search (recommended):
 pip install "ai-chronicle[embed]"
 ```
 
+Semantic search lets you find past decisions and experiments by *meaning* rather than exact keywords. For example, `chronicle search "caching performance"` will surface events about latency, throughput, and cache hit rates even if those exact words weren't used. It runs entirely locally using a small pre-trained model (no API calls, no data sent anywhere).
+
 ## Setup
 
 ```bash
