@@ -1,8 +1,23 @@
 # Chronicle
 
-Feature lifecycle traceability for AI-assisted development.
+**Every session, Claude starts from zero.**
 
-Chronicle gives Claude a persistent memory of what worked, what failed, and why — across sessions, machines, and collaborators. It guards against re-proposing falsified experiments and briefs Claude at the start of every session.
+It doesn't know that you spent three weeks on an approach that failed. It doesn't know which experiments you validated, which architectural decisions are locked, or why you made them. So it re-proposes the same dead ideas, re-explains the same context, and you spend the first ten minutes of every session getting it back up to speed.
+
+Chronicle fixes that.
+
+It's a lightweight SQLite-backed memory layer that sits between Claude and your codebase — logging decisions, tracking experiments, and briefing Claude automatically at the start of every session. When Claude proposes something you already tried and falsified, Chronicle blocks it with a warning before any tokens are wasted. When you search for a past decision, you can describe it in plain language and Chronicle finds it by meaning, not exact keywords.
+
+The result: Claude walks into every session knowing what worked, what didn't, and why — the same institutional memory a senior teammate carries naturally.
+
+**What Chronicle tracks:**
+- Experiments you ran and what they returned
+- Decisions you made and why you made them
+- Approaches that failed — permanently guarded against re-proposal
+- Code locations where ideas are currently wired (and alerts when those locations break)
+- Guard triggers, events logged, and estimated token savings — so you can see the value accumulating over time
+
+**Runs entirely locally.** No API calls. No data leaves your machine. The session brief, semantic search, and guard all run on your hardware using a pre-downloaded model.
 
 ## Requirements
 
