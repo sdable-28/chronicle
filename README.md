@@ -4,6 +4,13 @@ Feature lifecycle traceability for AI-assisted development.
 
 Chronicle gives Claude a persistent memory of what worked, what failed, and why — across sessions, machines, and collaborators. It guards against re-proposing falsified experiments and briefs Claude at the start of every session.
 
+## Requirements
+
+- **Python 3.12+** — [python.org](https://python.org)
+- **Claude Code** — [claude.ai/code](https://claude.ai/code) (for hooks and session briefs)
+- **Node.js 18+** *(optional)* — required only for CodeGraph: [nodejs.org](https://nodejs.org)
+- **uv** *(optional)* — required only for Graphify: `pip install uv`
+
 ## Install
 
 ```bash
