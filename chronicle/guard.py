@@ -86,6 +86,19 @@ def run_guard(
 
     # Critical matches (FALSIFIED) first
     matches.sort(key=lambda m: (m.status != "FALSIFIED", -m.score))
+
+    # Log FALSIFIED triggers for stats
+    for m in matches:
+        if m.status == "FALSIFIED":
+            try:
+                conn.execute(
+                    "INSERT INTO guard_log(proposed, matched_entity, matched_status, similarity, match_type)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (candidate_id, m.entity_id, m.status, m.score, m.match_type),
+                )
+            except Exception:
+                pass
+
     return matches
 
 

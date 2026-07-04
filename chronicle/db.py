@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
 
 DEFAULT_DB = Path.home() / ".chronicle" / "chronicle.db"
 
@@ -145,6 +145,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     events_logged INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS guard_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposed        TEXT    NOT NULL,
+    matched_entity  TEXT    NOT NULL,
+    matched_status  TEXT    NOT NULL,
+    similarity      REAL,
+    match_type      TEXT,
+    triggered_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_entity   ON events(entity_id);
 CREATE INDEX IF NOT EXISTS idx_events_type     ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_event_at ON events(event_at);
@@ -197,7 +207,17 @@ RESEARCH_EVENTS = {
 # Add entries here when CURRENT_VERSION is bumped — each value is a SQL
 # script applied exactly once when the DB is behind that version.
 MIGRATIONS: dict[int, str] = {
-    # 2: "ALTER TABLE entities ADD COLUMN new_col TEXT;",
+    2: """
+CREATE TABLE IF NOT EXISTS guard_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposed        TEXT    NOT NULL,
+    matched_entity  TEXT    NOT NULL,
+    matched_status  TEXT    NOT NULL,
+    similarity      REAL,
+    match_type      TEXT,
+    triggered_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+""",
 }
 
 

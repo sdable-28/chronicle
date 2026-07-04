@@ -855,6 +855,58 @@ def upgrade():
         click.echo("Already up to date.")
 
 
+# ── stats ─────────────────────────────────────────────────────────────────────
+
+@cli.command("stats")
+def stats():
+    """Show usage metrics and estimated token savings."""
+    with get_db() as conn:
+        # Entities by status
+        entity_rows = conn.execute(
+            "SELECT status, COUNT(*) as n FROM entities GROUP BY status ORDER BY n DESC"
+        ).fetchall()
+        total_entities = sum(r["n"] for r in entity_rows)
+
+        # Events + sessions
+        total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        total_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+        # Guard triggers (v2+ schema)
+        try:
+            guard_rows = conn.execute(
+                "SELECT COUNT(*) as n, matched_entity FROM guard_log GROUP BY matched_entity"
+            ).fetchall()
+            guard_total = sum(r["n"] for r in guard_rows)
+            guard_unique = len(guard_rows)
+        except Exception:
+            guard_total = None
+
+        # Wiring
+        wired = conn.execute(
+            "SELECT COUNT(*) FROM wiring WHERE status='ACTIVE'"
+        ).fetchone()[0]
+
+    click.echo(f"\nChronicle DB: {find_db()}\n")
+
+    click.echo(f"Entities     {total_entities} total")
+    for r in entity_rows:
+        click.echo(f"  {r['status']:<14} {r['n']}")
+
+    click.echo(f"\nEvents       {total_events}  across {total_sessions} sessions")
+    click.echo(f"Wired        {wired} active code locations")
+
+    if guard_total is None:
+        click.echo("\nGuard        run 'chronicle upgrade' to enable trigger tracking")
+    elif guard_total == 0:
+        click.echo("\nGuard        0 triggers (no re-proposals blocked yet)")
+    else:
+        low = guard_total * 10_000
+        high = guard_total * 50_000
+        click.echo(f"\nGuard        {guard_total} triggers  ({guard_unique} distinct entities blocked)")
+        click.echo(f"Est. saved   ~{low//1000}k–{high//1000}k tokens")
+    click.echo()
+
+
 # ── setup-hooks ───────────────────────────────────────────────────────────────
 
 _CLAUDE_MD_CHRONICLE = """
