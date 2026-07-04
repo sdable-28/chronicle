@@ -10,6 +10,6 @@
 
 Please **do not** open a public GitHub Issue for security vulnerabilities.
 
-Instead, report it privately through GitHub: the repository's Security tab, then Report a vulnerability.
+Instead, contact the maintainer privately through GitHub by visiting the [repository profile](https://github.com/sdable-28) and using the contact options available there.
 
 You will receive a response within 72 hours. If the issue is confirmed, a patch will be released as soon as possible.
