@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Distribution
+*.whl
+*.tar.gz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only files
+staging_import.json
+extract_memory.py
+migrate.py
+
+# Chronicle DB (personal data — each user inits their own)
+*.db
+*.db-wal
+*.db-shm
+
+# Sentence-transformers model cache
+.cache/
+models/
+
+# Test outputs
+*.log
